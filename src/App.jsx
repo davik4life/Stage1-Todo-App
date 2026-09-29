@@ -183,7 +183,7 @@ function App() {
 
         {/* App Footer */}
         <footer className="app-footer">
-          <span>TaskFlow Ecosystem • Built with React & Node.js</span>
+          <span>Proudly HNG 18 Todo App by Victor Adeshile</span>
         </footer>
       </div>
     </div>
