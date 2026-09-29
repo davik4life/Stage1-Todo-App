@@ -183,7 +183,7 @@ function App() {
 
         {/* App Footer */}
         <footer className="app-footer">
-          <span>Proudly HNG 18 Todo App by Victor Adeshile</span>
+          <span>Proudly HNG 15 Todo App by Victor Adeshile</span>
         </footer>
       </div>
     </div>
