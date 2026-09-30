@@ -1,0 +1,46 @@
+[build]
+  command = "npm test && npm run build"
+  publish = "build"
+  functions = "netlify/functions"
+
+[build.environment]
+  NODE_VERSION = "24"
+
+[functions]
+  node_bundler = "esbuild"
+  external_node_modules = ["@netlify/database", "pg"]
+
+[[redirects]]
+  from = "/todos"
+  to = "/.netlify/functions/api/todos"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/todos/*"
+  to = "/.netlify/functions/api/todos/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/notes"
+  to = "/.netlify/functions/api/notes"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/notes/*"
+  to = "/.netlify/functions/api/notes/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api/api/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

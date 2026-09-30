@@ -1,7 +1,18 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const request = require('supertest');
-const app = require('../index');
+const { PGlite } = require('@electric-sql/pglite');
+const { readFileSync, mkdtempSync, rmSync } = require('node:fs');
+const { tmpdir } = require('node:os');
+const path = require('node:path');
+const { createApp } = require('../app');
+const { createStore } = require('../store');
+const migration = readFileSync(path.join(__dirname, '../../netlify/database/migrations/202609290001_create_workspace.sql'), 'utf8');
+const db = new PGlite();
+const store = createStore((sql, values) => db.query(sql, values));
+const app = createApp({ store, serveStatic: false });
+test.before(async () => { await db.exec(migration); });
+test.after(async () => { await db.close(); });
 
 test('API Endpoint Tests - Todos & Notes Ecosystem', async (t) => {
   let createdTodoId;
@@ -165,4 +176,69 @@ test('Unknown API routes return JSON rather than the SPA', async () => {
     assert.equal(res.status, 404);
     assert.match(res.headers['content-type'], /json/);
   }
+});
+
+test('Records survive database close and reopen; deleted records stay deleted', async () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'taskflow-persistence-'));
+  let persistent;
+  try {
+    persistent = new PGlite(directory);
+    await persistent.exec(migration);
+    const first = createApp({ store: createStore((sql, values) => persistent.query(sql, values)), serveStatic: false });
+    const todo = await request(first).post('/todos').send({ title: 'Survives restart', dueDate: '2028-02-29' });
+    const note = await request(first).post('/notes').send({ title: 'Durable note', content: 'Saved in PostgreSQL', isPinned: true });
+    const removed = await request(first).post('/todos').send({ title: 'Deleted before restart' });
+    assert.equal(todo.status, 201);
+    assert.equal(note.status, 201);
+    await request(first).put(`/todos/${todo.body.id}`).send({ completed: true });
+    await request(first).delete(`/todos/${removed.body.id}`);
+    await persistent.close();
+    persistent = new PGlite(directory);
+    const second = createApp({ store: createStore((sql, values) => persistent.query(sql, values)), serveStatic: false });
+    const todos = await request(second).get('/todos');
+    assert.equal(todos.body.length, 1);
+    assert.equal(todos.body[0].id, todo.body.id);
+    assert.equal(todos.body[0].completed, true);
+    assert.equal(todos.body[0].dueDate, '2028-02-29');
+    const notes = await request(second).get('/notes');
+    assert.deepEqual(notes.body, [note.body]);
+  } finally {
+    if (persistent) await persistent.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('Independent app instances share updates and concurrent patches do not clobber fields', async () => {
+  const other = createApp({ store, serveStatic: false });
+  const created = await request(app).post('/todos').send({ title: "O'Brien; DROP TABLE todos; --" });
+  const [a, b] = await Promise.all([
+    request(app).put(`/todos/${created.body.id}`).send({ completed: true }),
+    request(other).put(`/todos/${created.body.id}`).send({ category: 'Shared' }),
+  ]);
+  assert.equal(a.status, 200);
+  assert.equal(b.status, 200);
+  const result = await request(other).get('/todos').query({ search: "O'Brien; DROP TABLE todos; --" });
+  assert.equal(result.body.length, 1);
+  assert.equal(result.body[0].completed, true);
+  assert.equal(result.body[0].category, 'Shared');
+  await request(app).delete(`/todos/${created.body.id}`);
+});
+
+test('Database failure never reports a successful mutation and fails readiness', async () => {
+  const broken = createApp({ store: createStore(async () => { throw new Error('secret connection details'); }), serveStatic: false });
+  const response = await request(broken).post('/todos').send({ title: 'Not saved' });
+  assert.equal(response.status, 500);
+  assert.doesNotMatch(JSON.stringify(response.body), /secret/);
+  const health = await request(broken).get('/api/health');
+  assert.equal(health.status, 503);
+  assert.equal(health.body.status, 'unavailable');
+});
+
+test('Netlify adapter preserves public API paths and JSON errors', async () => {
+  const serverless = require('serverless-http');
+  const handler = serverless(app);
+  const response = await handler({ httpMethod: 'GET', path: '/todos', headers: {}, queryStringParameters: {}, body: null }, {});
+  assert.equal(response.statusCode, 200);
+  assert(Array.isArray(JSON.parse(response.body)));
+  assert.equal(response.headers['cache-control'], 'no-store');
 });

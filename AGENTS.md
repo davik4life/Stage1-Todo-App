@@ -9,13 +9,20 @@ editing. `AGENT.md` is a compatibility pointer; do not duplicate rules there.
 - `src/App.jsx` owns fetching, mutations, filtering, and shared state.
 - Small UI components live in `src/components/`; global tokens in
   `src/index.css`, component styling in `src/App.css`.
-- Express 4 routes, validation, demo data, and startup are in `server/index.js`.
-- `server/test/api.test.js` uses `node:test`, strict assertions, and Supertest.
+- Express routes and factory are in `server/app.js`; validation in
+  `server/validation.js`, parameterized SQL in `server/store.js`, connection
+  selection in `server/database.js`, standalone startup in `server/index.js`.
+- Netlify Functions adapt Express in `netlify/functions/api.js`; the React
+  frontend is served statically by Netlify. API rewrites must precede SPA fallback.
+- SQL migrations live in `netlify/database/migrations/` and are applied by Netlify
+  before publish. Never reset or seed production on startup/deploy.
+- `server/test/api.test.js` uses `node:test`, assertions, Supertest, and isolated PGlite PostgreSQL databases.
 - Express serves `build/` plus the API from the same origin in production.
-- This is a shared, unauthenticated, in-memory demo. Records reset on restart.
-  Do not claim persistence, offline support, user isolation, or production
-  readiness. Private use requires authentication, authorization, and durable
-  storage before deployment. Do not introduce paid infrastructure implicitly.
+- PostgreSQL is the only production record store. No in-memory fallback is
+  allowed. A database outage must fail the request, not acknowledge a fake save.
+- This remains a shared, unauthenticated workspace. Do not claim user isolation
+  or private-note safety. Private use requires authentication and authorization.
+  Do not introduce paid infrastructure implicitly.
 
 ## Working rules
 
@@ -66,7 +73,8 @@ npm run build
 ```
 
 Add regression cases for behavior changes, especially malformed inputs, atomic
-updates, not-found responses, filtering, and create/update/delete paths. Tests
+updates, not-found responses, filtering, create/update/delete paths, database
+restart persistence, cross-instance updates, and failure handling. Tests
 must not contact Render or mutate live data. Supertest opens local sockets; if
 sandbox restrictions prevent that, use the approved execution path and report
 any remaining blocker honestly. Do not mistake sandbox failures for app bugs.
@@ -78,12 +86,18 @@ running them.
 
 ## Commands and deployment
 
-- `npm run dev`: Vite (3000) and Express (5001).
+- `npm run dev`: Vite (3000) and Express (5001) with a durable local PGlite database in ignored `.local-data/`.
 - `npm run build`: production assets in `build/`.
-- `npm start`: Express on `PORT` or 5001. Build first for production preview.
-- `render.yaml` is the Render Blueprint: free Node web service; build with
-  `npm ci --include=dev && npm test && npm run build`; start with `npm start`;
-  health path `/api/health`. Render provides `PORT`.
+- `npm start`: Express on `PORT` or 5001, requiring a migrated PostgreSQL `DATABASE_URL`. Build first for production preview.
+- `netlify.toml` is the deployment config: build with `npm test && npm run build`,
+  publish `build/`, functions in `netlify/functions/`. Netlify provisions its
+  database and injects `NETLIFY_DB_URL`. Never expose it to the browser or logs.
+- `/api/health` checks the database schema and returns 503 during DB failure.
+- `render.yaml` remains a legacy reference. Keep the previous service intact
+  until the Netlify migration is verified; pause Render auto-deploy before
+  publishing database-dependent code unless Render has a database configured.
+- Keep migration backups outside Git; migrate current records once using
+  parameterized writes and idempotent conflict handling. Do not overwrite data.
 - Deploy only within the user's requested scope. Verify repository, branch,
   account, plan, health endpoint, and UI. Do not overwrite unrelated services.
 - A prepared configuration or successful local build is not a live deployment.

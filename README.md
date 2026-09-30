@@ -1,12 +1,7 @@
 # TaskFlow & Notes
 
-React and Express task management with priorities, categories, due dates,
-filtering, progress tracking, and colored pinned notes.
-
-**Demo limitations:** everyone shares the same unauthenticated workspace. Data
-is held in server memory and resets whenever the process restarts or redeploys.
-Do not enter private information. Private use needs authentication and durable
-storage; a free Render web service does not provide a persistent disk.
+HNG 15 Todo App by Victor Adeshile. React frontend, Express API, and persistent
+PostgreSQL storage for tasks and notes.
 
 ## Local development
 
@@ -17,33 +12,57 @@ npm ci
 npm run dev
 ```
 
-Open http://localhost:3000. Vite proxies the API to Express at port 5001.
-`PORT` overrides the Express port (update the dev proxy if changing it).
+Open http://localhost:3000. Vite proxies API requests to port 5001. Local
+PostgreSQL runs through PGlite and stores data in the ignored `.local-data/`
+folder. Stopping and starting the app preserves records. Tests use separate
+temporary databases and never contact the hosted database.
 
 ```sh
 npm test
 npm run build
-npm start
 ```
 
-The production preview is at http://localhost:5001. Vite builds into `build/`,
-which Express serves alongside `/todos`, `/notes`, and `/api/health`.
-`VITE_API_URL` optionally overrides the API origin at build time; same-origin is
-the supported default. Never put secrets in Vite environment variables.
+For a production-like standalone server, configure `DATABASE_URL` with a
+PostgreSQL connection string, apply the SQL migration in
+`netlify/database/migrations/`, build, then run `npm start`. Never commit database
+credentials or put them in frontend `VITE_*` variables. There is no in-memory
+fallback: a missing or unavailable database causes an error instead of losing
+saved records silently.
 
-## Render deployment
+## Netlify deployment
 
-Push the verified source and lockfile to the connected GitHub repository, then
-create a Blueprint from `render.yaml` in the Render dashboard. It specifies:
+Import this GitHub repository into Netlify and select the `main` branch. The
+`netlify.toml` config sets build command `npm test && npm run build`, publish
+directory `build`, and the Express function in `netlify/functions/api.js`.
+API rewrites precede the SPA fallback. The frontend uses same-origin requests.
 
-- Free Node web service using Node 24.
-- Build: `npm ci --include=dev && npm test && npm run build`.
-- Start: `npm start`.
-- Health check: `/api/health`.
+Netlify Database is automatically provisioned when supported by the team's
+credit-based plan. Netlify supplies `NETLIFY_DB_URL` privately and applies the
+versioned SQL migrations before publishing. Production uses its persistent
+PostgreSQL database; deploy previews receive separate database branches. Never
+seed or reset the production database during startup or deployment.
 
-Render supplies `PORT`; no frontend API URL is needed. Verify the health endpoint
-and task/note flows at the assigned service URL. Free services sleep after idle
-periods, and this app's in-memory records reset when the process restarts.
-See [Render's free-service limits](https://render.com/docs/free).
+Confirm plan limits in the dashboard before provisioning. No paid plan upgrade
+is required by this code. Netlify Functions and database compute may start cold,
+but records remain in PostgreSQL across function restarts and deployments.
 
-Contributor rules and API contracts are in [AGENTS.md](./AGENTS.md).
+Verify `/api/health` returns `status: "ok"` and `storage: "postgresql"` after
+publishing, then check task/note operations. Git-connected production deploys
+should follow pushes to `main`.
+
+The previous Render service is kept available during migration. Do not push the
+new PostgreSQL backend to a Render service without a configured database; pause
+its automatic deploys before publishing the migration to `main`.
+
+## Existing data and access
+
+Before switching, export `/todos` and `/notes` from the old service. Local
+migration backups belong in ignored `migration-backups/`, never in Git. Import
+records once, preserving IDs and timestamps, with conflict handling so retrying
+does not duplicate records. Previously reset in-memory data cannot be recovered.
+
+This app still has a shared, public workspace with no login or per-user access
+control. Persistence does not provide privacy. Do not use it for private notes
+until authentication and ownership checks are implemented.
+
+Contributor rules are in [AGENTS.md](./AGENTS.md).
